@@ -1,4 +1,9 @@
 # -* - coding: utf-8 -*-
+
+# 対応ファイル: mp3
+# いろんな文字化けを治す
+# タグ情報をもとにファイル整理もできる
+
 # MP3ファイルのタグ情報が SJIS で書き込まれている場合、UTF-16に書き換えるプログラム
 # ・古いMP3ファイルはタグ情報が SJIS で書き込まれている場合がある。
 # ・現在はMP3ファイルのタグ情報は UTF-16 で書き込むルールになっている。
@@ -6,118 +11,158 @@
 # ・SJISで書き込まれたタグ情報をUTF-16に変換するのが本プログラムである。
 # ・更新対象の MP3タグ要素は Artist, Album, AlbumArtist, OriginalArtist, disc_num, track_num, title
 
-#---------------------------------------------------------------------
+# ---------------------------------------------------------------------
 # ユーザー設定値
-#---------------------------------------------------------------------
+# ---------------------------------------------------------------------
 
 # mp3格納フォルダ (最上位パスを指定)
-targetFolderPath = './Convert/'
+from math import log
 
-# 出力ファイル (タグ情報一覧)
-logFilePath = './ConvertMP3tag_SJIStoUTF16.txt'
+
+def delete_ng_letter(str):
+    if str is None:
+        return ""
+    return (
+        str.replace(":", "：")
+        .replace("?", "？")
+        .replace("*", "＊")
+        .replace("/", "／")
+        .replace("\\", "＼")
+        .replace("<", "＜")
+        .replace(">", "＞")
+        .replace("|", "｜")
+        .replace('"', "”")
+    )
+
+
+# 入力フォルダ
+targetFolderPath = "C:\\破損"
+
+# 出力ファイル
+logFilePath = "C:\\mp3TagLog.txt"
+
+# 出力ファイル2
+logFilePath2 = "C:\\mp3TagLog2.txt"
+logFileText2 = ""
+
+# ファイル整理後のフォルダ
+afterTargetFolderPath = "C:\\dst\\"
+
 
 # タグ更新フラグ
 # True:  タグ情報一覧ファイルを出力後、MP3ファイルのタグ更新する
-# False: タグ情報一覧ファイルを出力後、MP3ファイルのタグ更新しない
+# False: タグ情報一覧ファイルを出力後、MP3ファイルのタグ更新しない, さらにファイルを移動するかも
+# convertMP3tag = True
 convertMP3tag = False
 
+# ファイル移動フラグ
+isGoingtoMove = False
 
-#---------------------------------------------------------------------
+
+# ---------------------------------------------------------------------
 # ライブラリ類の読み込み
-#---------------------------------------------------------------------
+# ---------------------------------------------------------------------
 import eyed3
 import glob
 import sys
 import os
 from tkinter import Tk, messagebox
 
+import shutil
 
-#---------------------------------------------------------------------
+
+# ---------------------------------------------------------------------
 # メッセージボックスの表示
-#---------------------------------------------------------------------
+# ---------------------------------------------------------------------
 def MBox(msg):
 
-	# Tkを定義
-	root = Tk()
-	root.withdraw() # Tkのrootウインドウを表示しない
+    # Tkを定義
+    root = Tk()
+    root.withdraw()  # Tkのrootウインドウを表示しない
 
-	# コンソール表示
-	print('\n' + msg + '\n')
+    # コンソール表示
+    print("\n" + msg + "\n")
 
-	# メッセージボックスの表示
-	messagebox.showerror(os.path.basename(__file__), msg)
+    # メッセージボックスの表示
+    messagebox.showerror(os.path.basename(__file__), msg)
 
 
-#---------------------------------------------------------------------
+# ---------------------------------------------------------------------
 # エラー終了 (コンソールとメッセージボックスでエラー内容を通知して終了)
-#---------------------------------------------------------------------
+# ---------------------------------------------------------------------
 def ErrorEnd(msg):
 
     # メッセージボックスを表示
-	MBox(msg)
+    MBox(msg)
 
-	# プロセス終了
-	sys.exit()
+    # プロセス終了
+    sys.exit()
 
 
-#---------------------------------------------------------------------
+# ---------------------------------------------------------------------
 # 設定値の妥当性確認
-#---------------------------------------------------------------------
+# ---------------------------------------------------------------------
 def CheckParams():
 
     # ターゲットフォルダパス(設定値)を絶対パスに変換
     targetDir = os.path.abspath(targetFolderPath)
 
     # 設定値のチェック (入力フォルダパスがフォルダパスであるか。ファイルパスで無いか)
-    if (os.path.isdir(targetDir) == False):
-        ErrorEnd('Error | 指定されたパスはフォルダパスではありません ' + targetDir)
+    if os.path.isdir(targetDir) == False:
+        ErrorEnd("Error | 指定されたパスはフォルダパスではありません " + targetDir)
 
     # 設定値のチェック (入力されたフォルダパスが実在するか)
-    if (os.path.exists(targetDir) == False):
-        ErrorEnd('Error | 指定されたフォルダが存在しません ' + targetDir)
+    if os.path.exists(targetDir) == False:
+        ErrorEnd("Error | 指定されたフォルダが存在しません " + targetDir)
 
     # ターゲットフォルダ以下にあるファイルを再起的に探索
-    searchText = targetDir + '/**/*.mp3'
+    searchText = targetDir + "/**/*.mp3"
     targetFiles = sorted(glob.glob(searchText, recursive=True))
-    if(len(targetFiles) == 0):
-        ErrorEnd('Error | 指定されたフォルダ内に対象ファイルが存在しません ' + targetDir)
+    if len(targetFiles) == 0:
+        ErrorEnd(
+            "Error | 指定されたフォルダ内に対象ファイルが存在しません " + targetDir
+        )
 
 
-#---------------------------------------------------------------------
+# ---------------------------------------------------------------------
 # ファイルのパーミション変更 (読み取り専用だった場合は書き込み可能に変更)
-#---------------------------------------------------------------------
+# ---------------------------------------------------------------------
 def ChangePermission_RtoW():
 
     # ターゲットフォルダ以下にあるファイルを再起的に探索
-    searchText = targetFolderPath + '/**/*.mp3'
+    searchText = targetFolderPath + "/**/*.mp3"
     targetFiles = sorted(glob.glob(searchText, recursive=True))
 
     # ターゲットファイルが読み取り専用の場合は、書き込み可能に変更
-    for i, file in enumerate(targetFiles):
-        target = os.path.abspath(file)
-        if not os.access(target, os.W_OK):
-            os.chmod(target, stat.S_IWRITE)
+    # for i, file in enumerate(targetFiles):
+    #     target = os.path.abspath(file)
+    #     if not os.access(target, os.W_OK):
+    #         os.chmod(target, stat.S_IWRITE)
 
 
-#---------------------------------------------------------------------
+# ---------------------------------------------------------------------
 # タグ情報を一覧出力する + タグ情報を更新する
-#---------------------------------------------------------------------
+# ---------------------------------------------------------------------
 def ConvertTagInfo_SJIStoUTF16(encodeInfoFilePath, updateTag):
+    global logFileText2
 
     # ターゲットフォルダ以下にあるファイルを再起的に探索
-    searchText = targetFolderPath + '/**/*.mp3'
+    searchText = targetFolderPath + "/**/*.mp3"
     targetFiles = sorted(glob.glob(searchText, recursive=True))
 
     # 出力ファイル(タグ情報)を新規作成・初期化
-    with open(encodeInfoFilePath, mode='w', encoding='UTF-16') as f:
+    with open(encodeInfoFilePath, mode="w", encoding="UTF-16") as f:
 
         # 出力ファイルのヘッダ行を出力
-        f.write(',,Before,,,,,,,,,,After,,,,,,,,' + '\r\n')
-        f.write('FilePath,Diff,Encode,Artist,Album_Artist,Original_Artist,Album,disc_num,track_num,title,version,images,Encode,Artist,Album_Artist,Original_Artist,Album,disc_num,track_num,title' + '\r\n')
+        f.write(",,Before,,,,,,,,,,After,,,,,,,," + "\r\n")
+        f.write(
+            "FilePath,Diff,Encode,Artist,Album_Artist,Original_Artist,Album,disc_num,track_num,title,version,images,Encode,Artist,Album_Artist,Original_Artist,Album,disc_num,track_num,title"
+            + "\r\n"
+        )
 
         # 変数の初期化 ()ディスクNo. トラックNo.更新用)
-        preArtist = ''
-        preAlbum = ''
+        preArtist = ""
+        preAlbum = ""
         trackNo = 0
 
         # ターゲットファイルを一つずつ処理してゆく
@@ -125,15 +170,15 @@ def ConvertTagInfo_SJIStoUTF16(encodeInfoFilePath, updateTag):
 
             # ターゲットファイルのパスをフルパス化
             targetFile = os.path.abspath(targetFile)
-            print (str(i+1) + '/' + str(len(targetFiles)) + ' ' + targetFile)
+            # print(str(i + 1) + "/" + str(len(targetFiles)) + " " + targetFile)
             f.write('"' + targetFile + '"')
 
             # MP3タグ情報を取得する
             audioInfo = eyed3.load(targetFile)
             tag = audioInfo.tag
             if not tag:
-                print('Info | NoTag')
-                f.write(',"' + 'NoTag' + '"' + '\r\n')
+                print("Info | NoTag")
+                f.write(',"' + "NoTag" + '"' + "\r\n")
                 continue
 
             artist = tag.artist
@@ -153,7 +198,7 @@ def ConvertTagInfo_SJIStoUTF16(encodeInfoFilePath, updateTag):
             original_artist_2 = None
 
             # 1つ前のファイルと同じアーティスト名・アルバム名ならトラックナンバーを1つカウントアップ
-            if( (artist != preArtist) or (album != preAlbum) ):
+            if (artist != preArtist) or (album != preAlbum):
                 trackNo = 1
             else:
                 trackNo = trackNo + 1
@@ -163,56 +208,92 @@ def ConvertTagInfo_SJIStoUTF16(encodeInfoFilePath, updateTag):
             preAlbum = album
 
             # タグ情報の文字コード変換
-            enc1, enc2 = '', ''
+            enc1, enc2 = "", ""
             # 元々入力されていた文字列が UTF-16 の場合 (違う場合はExceptionが発生する)
             try:
-                enc1, enc2 = 'utf-16', 'utf-16'
-                if(artist is not None):
+                # utf16 -> cp932のときはここ、アルファベット以外の場合、最初２文字を削除する
+
+                # enc1, enc2 = "utf-16", "cp932"
+                # # enc1, enc2 = "latin1", "cp932"
+                # # enc1, enc2 = "utf-16", "utf-16"
+                # if artist is not None:
+                #     artist_2 = artist.encode(enc1).decode(enc2)[2:]
+                # if album is not None:
+                #     album_2 = album.encode(enc1).decode(enc2)[2:]
+                # if title is not None:
+                #     title_2 = title.encode(enc1).decode(enc2)[2:]
+                # if album_artist is not None:
+                #     album_artist_2 = album_artist.encode(enc1).decode(enc2)[2:]
+                # if original_artist is not None:
+                #     original_artist_2 = original_artist.encode(enc1).decode(enc2)[2:]
+
+                # 自分で選んでください
+                # enc1, enc2 = "utf-16", "cp932"
+                enc1, enc2 = "latin1", "cp932"
+                if artist is not None:
                     artist_2 = artist.encode(enc1).decode(enc2)
-                if(album is not None):
+                if album is not None:
                     album_2 = album.encode(enc1).decode(enc2)
-                if(title is not None):
+                if title is not None:
                     title_2 = title.encode(enc1).decode(enc2)
-                if(album_artist is not None):
+                if album_artist is not None:
                     album_artist_2 = album_artist.encode(enc1).decode(enc2)
-                if(original_artist is not None):
+                if original_artist is not None:
                     original_artist_2 = original_artist.encode(enc1).decode(enc2)
-                #print('Converted from ' + enc1 + ' to ' +enc2)
+
+                # enc1, enc2 = "etc", "etc"
+                # artist_2 = artist
+                # album_2 = album
+                # title_2 = title
+                # album_artist_2 = album_artist
+                # original_artist_2 = original_artist
+
+                # print('Converted from ' + enc1 + ' to ' +enc2)
             # 元々入力されていた文字が SJIS の場合 (違う場合はExceptionが発生する)
+            # except:
+            #     exit()
+            # try:
+            #     enc1, enc2 = "utf-16", "utf-16"
+            #     # enc1, enc2 = "latin1", "cp932"
+            #     if artist is not None:
+            #         artist_2 = artist.encode(enc1).decode(enc2)
+            #     if album is not None:
+            #         album_2 = album.encode(enc1).decode(enc2)
+            #     if title is not None:
+            #         title_2 = title.encode(enc1).decode(enc2)
+            #     if album_artist is not None:
+            #         album_artist_2 = album_artist.encode(enc1).decode(enc2)
+            #     if original_artist is not None:
+            #         original_artist_2 = original_artist.encode(enc1).decode(enc2)
+            #     # enc1, enc2 = "cp932", "utf-16"
+            #     # print('Converted from ' + enc1 + ' to ' +enc2)
+            # # 元々入力されていた文字列が空欄の場合
             except:
-                try:
-                    enc1, enc2 = 'latin1', 'cp932'
-                    if(artist is not None):
-                        artist_2 = artist.encode(enc1).decode(enc2)
-                    if(album is not None):
-                        album_2 = album.encode(enc1).decode(enc2)
-                    if(title is not None):
-                        title_2 = title.encode(enc1).decode(enc2)
-                    if(album_artist is not None):
-                        album_artist_2 = album_artist.encode(enc1).decode(enc2)
-                    if(original_artist is not None):
-                        original_artist_2 = original_artist.encode(enc1).decode(enc2)
-                    enc1, enc2 = 'cp932', 'utf-16'
-                    #print('Converted from ' + enc1 + ' to ' +enc2)
-                # 元々入力されていた文字列が空欄の場合
-                except:
-                    enc1, enc2 = 'etc', 'etc'
-                    artist_2 = artist
-                    album_2 = album
-                    title_2 = title
-                    album_artist_2 = album_artist
-                    original_artist_2 = original_artist
-                    #print('Not Converted')
+                enc1, enc2 = "etc", "etc"
+                artist_2 = artist
+                album_2 = album
+                title_2 = title
+                album_artist_2 = album_artist
+                original_artist_2 = original_artist
+                # print('Not Converted')
 
             # 文字コードの変更・ディスク番号・トラック番号の打ち直しによって、文字列に変化があったら Diff フラグを True にする
             diff, diffWord, diffNum = True, True, True
-            if((artist == artist_2) and (album == album_2) and (title == title_2) and (album_artist == album_artist_2) and (original_artist == original_artist_2)):
+            if (
+                (artist == artist_2)
+                and (album == album_2)
+                and (title == title_2)
+                and (album_artist == album_artist_2)
+                and (original_artist == original_artist_2)
+            ):
                 diffWord = False
-            if((str(disc_num) == str(disc_num_2)) and (str(track_num) == str(track_num_2))):
+            if (str(disc_num) == str(disc_num_2)) and (
+                str(track_num) == str(track_num_2)
+            ):
                 diffNum = False
-            if((diffWord == False) and (diffNum == False)):
+            if (diffWord == False) and (diffNum == False):
                 diff = False
-            #print(diff, diffWord, diffNum)
+            # print(diff, diffWord, diffNum)
 
             # 出力ファイル(タグ情報)の出力
             f.write(',"' + str(diff) + '"')
@@ -234,33 +315,84 @@ def ConvertTagInfo_SJIStoUTF16(encodeInfoFilePath, updateTag):
             f.write(',"' + str(disc_num_2) + '"')
             f.write(',"' + str(track_num_2) + '"')
             f.write(',"' + str(title_2) + '"')
-            f.write('\r\n')
+            f.write("\r\n")
 
             # タグ情報の更新 (ユーザーが入力したタグ更新フラグが True の場合)
-            if (updateTag == True):
-                #audioInfo.tag.clear()
+            if updateTag == True:
+                # audioInfo.tag.clear()
                 # 文字を入力する領域に、文字コード変換前後で1つでも差異があった場合
-                if (diffWord == True):
+                if diffWord == True:
                     tag.artist = artist_2
                     tag.album_artist = album_artist_2
                     tag.original_artist = original_artist_2
                     tag.album = album_2
                     tag.title = title_2
                 # 通し番号領域に差異があった場合
-                if (diffNum == True):
+                if diffNum == True:
                     tag.disc_num = disc_num_2
                     tag.track_num = track_num_2
                 try:
-                    audioInfo.tag.save(encoding = 'utf-16', version = (2, 4, 0), backup = False)
+                    audioInfo.tag.save(
+                        encoding="utf-16", version=(2, 4, 0), backup=False
+                    )
                 except:
-                    print('Exception from audioInfo.tag.save()')
+                    print("Exception from audioInfo.tag.save()")
+            else:
+                # アーティスト名/アルバム名/01-タイトル.{拡張子}のように整理する
+                # afterTargetFolderPath
+                #  アーティスト名のフォルダが存在しない場合は、作成する
+                #  アーティスト名のフォルダ内に、アルバム名のフォルダが存在しない場合は、作成する
+                artist_2 = delete_ng_letter(artist_2)
+
+                if album_artist_2 is not None:
+                    album_artist_2 = delete_ng_letter(album_artist_2)
+                else:
+                    album_artist_2 = artist_2
+                album_2 = delete_ng_letter(album_2)
+                title_2 = delete_ng_letter(title_2)
+
+                if isGoingtoMove:
+                    if not os.path.exists(afterTargetFolderPath + album_artist_2):
+                        os.makedirs(afterTargetFolderPath + album_artist_2)
+
+                    if not os.path.exists(
+                        afterTargetFolderPath + album_artist_2 + "\\" + album_2
+                    ):
+                        os.makedirs(
+                            afterTargetFolderPath + album_artist_2 + "\\" + album_2
+                        )
+
+                new_fileName = (
+                    str(track_num_2[0]).zfill(2)
+                    + "-"
+                    + title_2
+                    + os.path.splitext(targetFile)[1]
+                )
+                print(str(i + 1) + "/" + str(len(targetFiles)))
+                print(artist_2 + "\\" + album_2 + "\\" + new_fileName)
+                logFileText2 += str(i + 1) + "/" + str(len(targetFiles)) + "\n"
+                logFileText2 += targetFile + "\n"
+                logFileText2 += (
+                    album_artist_2 + "\\" + album_2 + "\\" + new_fileName + "\n"
+                )
+
+                if isGoingtoMove:
+                    shutil.move(
+                        targetFile,
+                        afterTargetFolderPath
+                        + album_artist_2
+                        + "\\"
+                        + album_2
+                        + "\\"
+                        + new_fileName,
+                    )
 
 
-#---------------------------------------------------------------------
+# ---------------------------------------------------------------------
 # メイン
-#---------------------------------------------------------------------
+# ---------------------------------------------------------------------
 
-print('■ Process Start')
+print("■ Process Start")
 
 # 設定値の妥当性チェック
 CheckParams()
@@ -273,12 +405,15 @@ ChangePermission_RtoW()
 # updateTag=False: タグ情報一覧ファイルを出力後、MP3ファイルのタグ更新しない
 ConvertTagInfo_SJIStoUTF16(logFilePath, convertMP3tag)
 
-print('■ Process Finished')
+with open(logFilePath2, mode="w", encoding="Shift_JIS", errors="ignore") as f:
+    f.write(logFileText2)
+
+print("■ Process Finished")
 
 
-#---------------------------------------------------------------------
+# ---------------------------------------------------------------------
 # 参考資料
-#---------------------------------------------------------------------
+# ---------------------------------------------------------------------
 # [1] Mac における MP3 ファイルの文字化けを直してみた
 # https://abicky.net/2013/01/23/072137/
 #
@@ -294,5 +429,5 @@ print('■ Process Finished')
 # [5] Pythonのchardetで文字コード判定
 # https://blog.imind.jp/entry/2019/08/24/143939
 #
-#---------------------------------------------------------------------
+# ---------------------------------------------------------------------
 # End
